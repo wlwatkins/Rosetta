@@ -200,6 +200,27 @@ export default defineContentScript({
       };
     }
 
+    // The tab title lives in <head>, which the body walker never reaches.
+    // Anchor it to <html> so it queues immediately rather than waiting for
+    // an element to scroll into view.
+    function makeTitleEntry(): Entry | null {
+      const raw = document.title;
+      if (!raw?.trim()) return null;
+      return {
+        el: document.documentElement,
+        original: raw.trim(),
+        queued: false,
+        translated: false,
+        markable: false,
+        apply: (v) => {
+          document.title = v;
+        },
+        reset: () => {
+          document.title = raw;
+        },
+      };
+    }
+
     function collectAttrs(root: Node): Entry[] {
       if (!(root instanceof Element) && root.nodeType !== Node.DOCUMENT_NODE) return [];
       const scope = root as Element;
@@ -462,6 +483,8 @@ export default defineContentScript({
       ensureStyle();
 
       entries = collectFrom(document.body);
+      const title = makeTitleEntry();
+      if (title) entries.push(title);
       srcIso = await detectSourceIso();
       if (id !== sessionId) return;
 

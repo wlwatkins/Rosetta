@@ -24,8 +24,9 @@ $20/million) — a small change to `utils/providers.ts`.
 - **Dynamic content.** A `MutationObserver` feeds newly rendered DOM into the same queue.
 - **In-place swap.** Only text nodes are replaced, so markup, links and layout survive. Originals are
   kept in memory, so **Restore** works without a reload.
-- **Attributes too.** Text that lives in `placeholder`, `title`, `aria-label` and `alt` is translated
-  as well, so search boxes, tooltips and screen-reader labels don't stay in the original language.
+- **Attributes and the tab title too.** Text in `placeholder`, `title`, `aria-label` and `alt` is
+  translated, as is `document.title`, so search boxes, tooltips, screen-reader labels and the
+  browser tab don't stay in the original language.
 - **Nothing wasted.** Strings with no letters (prices, counts, `•`) and — when translating to English
   — already-ASCII strings never leave the browser.
 - **Paused when hidden.** No work happens while the tab is in the background.

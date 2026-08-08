@@ -2,7 +2,7 @@
   "name": "rosetta",
   "description": "Translate any page in place — Google Translate, your browser, or a local LLM",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "scripts": {
     "dev": "wxt",
