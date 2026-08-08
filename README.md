@@ -40,7 +40,12 @@ whole runs. The popup shows coverage for the current page and has a clear button
 ## UI
 
 Toolbar popup: target language, Translate / Cancel / Restore, per-tab "auto-translate on load"
-(which also translates the current page immediately), batch progress, elapsed time, cache stats.
+(which also translates the current page immediately), a global **"always translate pages written in
+&lt;language&gt;"** rule, batch progress, elapsed time, cache stats.
+
+The global rule detects the page's language with `browser.i18n.detectLanguage` and only fires on a
+confident match (≥60%, and only with enough text to judge), so an English page with a Hebrew heading
+is left alone.
 Text currently in the pipeline shimmers blue. The toolbar badge shows `…` while translating, `✓`
 when done, `!` on error.
 

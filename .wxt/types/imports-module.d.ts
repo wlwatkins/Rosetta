@@ -19,7 +19,7 @@ declare module '#imports' {
   export { onMount, beforeUpdate, afterUpdate, onDestroy, tick, setContext, getContext, hasContext, getAllContexts, createEventDispatcher } from 'svelte';
   export { fakeBrowser } from 'wxt/testing/fake-browser';
   export { clearCache, buildCachePrefix, countCached, withCache } from '../utils/cache';
-  export { LANGUAGES, languageName, isoFromCode } from '../utils/languages';
+  export { LANGUAGES, languageName, isoFromCode, sameLanguage } from '../utils/languages';
   export { cancelActive, translateBatch } from '../utils/providers';
   export { DEFAULT_SETTINGS, loadSettings, saveSettings, Settings } from '../utils/settings';
 }

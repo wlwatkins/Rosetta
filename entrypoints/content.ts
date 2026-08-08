@@ -1,5 +1,6 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { browser } from 'wxt/browser';
+import { isoFromCode, sameLanguage } from '@/utils/languages';
 
 interface Entry {
   node: Text;
@@ -101,14 +102,30 @@ export default defineContentScript({
       }
     });
 
-    // Auto-translate on load when this tab is flagged (per-tab toggle in popup).
+    // Auto-translate on load: either this tab was flagged in the popup, or a
+    // global rule says "translate every page written in <language>".
     void (async () => {
       try {
         const res = await browser.runtime.sendMessage({ type: 'auto-translate-check' });
-        if (res?.auto) {
-          // Small delay so late-rendering content is included.
-          setTimeout(() => void startSession(res.targetLang), 800);
+        if (!res) return;
+        // Small delay so late-rendering content is included in the sample.
+        const start = () => setTimeout(() => void startSession(res.targetLang), 800);
+
+        if (res.auto) {
+          start();
+          return;
         }
+        if (!res.autoSourceLang || res.autoSourceLang === res.targetLang) return;
+
+        // Language rule: only translate if the page really is in that language.
+        setTimeout(async () => {
+          // Require a confident match: auto-translating a misdetected page is
+          // far more annoying than not translating it.
+          const detected = await detectSourceIso(scanTexts(), 60);
+          if (detected && sameLanguage(detected, isoFromCode(res.autoSourceLang))) {
+            void startSession(res.targetLang);
+          }
+        }, 800);
       } catch {
         // background unavailable — skip
       }
@@ -567,15 +584,19 @@ export default defineContentScript({
     }
 
     // In-browser MT models (NLLB) need an explicit source language.
-    async function detectSourceIso(texts?: string[]): Promise<string> {
+    async function detectSourceIso(texts?: string[], minPercent = 0): Promise<string> {
       const sample = (texts ?? entries.map((e) => e.original.trim()))
         .slice(0, 80)
         .join(' ')
         .slice(0, 2000);
+      // Too little text to judge — a wrong guess is worse than no guess.
+      if (sample.replace(/\s+/g, '').length < 20) return '';
       try {
         const det = await browser.i18n.detectLanguage(sample);
         const top = det?.languages?.[0];
-        if (top?.language && top.language !== 'und') return top.language;
+        if (top?.language && top.language !== 'und' && (top.percentage ?? 0) >= minPercent) {
+          return top.language;
+        }
       } catch {
         // i18n API unavailable — fall through
       }

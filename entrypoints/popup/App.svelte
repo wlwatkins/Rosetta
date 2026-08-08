@@ -185,6 +185,16 @@
       Auto-translate this tab on load
     </label>
 
+    <label class="field">
+      Always translate pages written in
+      <select bind:value={settings.autoSourceLang}>
+        <option value="">Never — ask me each time</option>
+        {#each LANGUAGES.filter((l) => l.code !== settings.targetLang) as lang}
+          <option value={lang.code}>{lang.name}</option>
+        {/each}
+      </select>
+    </label>
+
     {#if pageStatus === 'working' && progress.total > 0}
       <progress value={progress.done} max={progress.total}></progress>
       <p class="hint">{progress.done} / {progress.total} batches</p>

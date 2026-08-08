@@ -33,6 +33,7 @@ declare global {
   const loadSettings: typeof import('C:/Users/William/Documents/Development/rosetta/utils/settings').loadSettings
   const onDestroy: typeof import('svelte').onDestroy
   const onMount: typeof import('svelte').onMount
+  const sameLanguage: typeof import('C:/Users/William/Documents/Development/rosetta/utils/languages').sameLanguage
   const saveSettings: typeof import('C:/Users/William/Documents/Development/rosetta/utils/settings').saveSettings
   const setContext: typeof import('svelte').setContext
   const storage: typeof import('wxt/utils/storage').storage

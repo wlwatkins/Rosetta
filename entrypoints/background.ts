@@ -66,10 +66,15 @@ export default defineBackground(() => {
     if (message?.type === 'auto-translate-check') {
       const tabId = sender.tab?.id;
       (async () => {
-        const tabs = await getAutoTabs();
-        if (tabId == null || !tabs[tabId]) return { auto: false };
         const settings = await loadSettings();
-        return { auto: true, targetLang: settings.targetLang };
+        const tabs = await getAutoTabs();
+        return {
+          // This tab was explicitly flagged in the popup.
+          auto: tabId != null && !!tabs[tabId],
+          // Global rule: translate any page detected as this language.
+          autoSourceLang: settings.autoSourceLang,
+          targetLang: settings.targetLang,
+        };
       })().then(sendResponse);
       return true;
     }

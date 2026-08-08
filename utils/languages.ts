@@ -22,3 +22,17 @@ export function languageName(code: string): string {
 export function isoFromCode(code: string): string {
   return LANGUAGES.find((l) => l.code === code)?.iso ?? code.toLowerCase();
 }
+
+/**
+ * Compare language codes from different sources: Chrome's detector reports
+ * Hebrew as "iw" or "he" and Chinese as "zh-CN"/"zh-Hans" depending on API.
+ */
+export function sameLanguage(a: string, b: string): boolean {
+  const norm = (x: string) => {
+    const s = x.toLowerCase().replace('_', '-');
+    if (s === 'iw' || s.startsWith('he')) return 'he';
+    if (s.startsWith('zh')) return 'zh';
+    return s.split('-')[0]!;
+  };
+  return !!a && !!b && norm(a) === norm(b);
+}
