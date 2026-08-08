@@ -1,0 +1,21 @@
+{
+  "name": "rosetta",
+  "description": "Translate any page in place — Google Translate, your browser, or a local LLM",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "svelte-check --tsconfig ./tsconfig.json",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@wxt-dev/module-svelte": "^2.0.5",
+    "svelte": "^5.56.8",
+    "svelte-check": "^4.7.5",
+    "typescript": "^6.0.3",
+    "wxt": "^0.21.3"
+  }
+}

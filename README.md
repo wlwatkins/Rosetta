@@ -11,7 +11,12 @@ Built for Hebrew↔English, works for any pair the chosen backend supports.
 |---|---|---|
 | **Google Translate** *(default)* | ~30ms/string | Free, no API key. Uses Google's public `translate_a` endpoint — the one their own site and app use. Undocumented, IP rate-limited, and cloud-based (page text leaves your machine). The officially sanctioned alternative is Cloud Translation: a GCP project with 500k chars/month free. |
 | **LM Studio** | ~1s/string on GPU | Local LLM at `http://localhost:1234`. Best quality (DictaLM-3.0-Nemotron-12B-Instruct is excellent for Hebrew). Rosetta lists and loads models itself through LM Studio's REST API with per-model tuned parameters. |
-| **Browser built-in** | on-device | Chrome 138+ Translator API. **Not in Brave** — Brave ships the translation engine for its own translate feature but doesn't expose the JS API. Chrome also only supports a fixed set of language pairs (Hebrew is often unavailable). |
+
+The browser's built-in Translator API was tried and **removed**: Brave doesn't expose it at all, and
+Chrome 151 refuses `iw→en` with "unable to create translator" even with the `en - iw` pack showing
+as *Installed* at `chrome://on-device-translation-internals`. Notes if anyone revisits it: Chrome
+lists Hebrew only as the legacy `iw` (no `he` entry), and pack downloads need a user gesture that
+does **not** survive an `await` — `create()` must be the first statement in the click handler.
 
 ## How it translates
 
