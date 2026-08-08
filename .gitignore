@@ -1,2 +1,28 @@
+# Build output and packaged zips
 .output
+stats.html
+stats-*.json
+
+# WXT generated types and config (recreated by `wxt prepare` on install)
+.wxt
+
+# Dependencies
 node_modules
+
+# Logs and debug dumps
+*.log
+npm-debug.log*
+about-gpu-*.txt
+
+# Editor / OS noise
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+
+# Local environment overrides
+.env
+.env.*
+!.env.example
+web-ext.config.ts

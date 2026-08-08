@@ -11,12 +11,8 @@ export default defineConfig({
   }),
   manifest: {
     name: 'Rosetta',
-    description: 'Translate any page in place — Google Translate or your own local LLM',
-    permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting', 'tabs'],
-    host_permissions: [
-      'https://translate.googleapis.com/*',
-      'http://localhost:1234/*',
-      'http://127.0.0.1:1234/*',
-    ],
+    description: 'Translate any page in place, translating only what you can actually see',
+    permissions: ['storage', 'unlimitedStorage', 'activeTab', 'tabs'],
+    host_permissions: ['https://translate.googleapis.com/*'],
   },
 });

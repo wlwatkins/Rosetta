@@ -10,7 +10,6 @@ declare global {
   const beforeUpdate: typeof import('svelte').beforeUpdate
   const browser: typeof import('wxt/browser').browser
   const buildCachePrefix: typeof import('C:/Users/William/Documents/Development/rosetta/utils/cache').buildCachePrefix
-  const cachedProfile: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').cachedProfile
   const cancelActive: typeof import('C:/Users/William/Documents/Development/rosetta/utils/providers').cancelActive
   const clearCache: typeof import('C:/Users/William/Documents/Development/rosetta/utils/cache').clearCache
   const countCached: typeof import('C:/Users/William/Documents/Development/rosetta/utils/cache').countCached
@@ -23,24 +22,17 @@ declare global {
   const defineContentScript: typeof import('wxt/utils/define-content-script').defineContentScript
   const defineUnlistedScript: typeof import('wxt/utils/define-unlisted-script').defineUnlistedScript
   const defineWxtPlugin: typeof import('wxt/utils/define-wxt-plugin').defineWxtPlugin
-  const ensureLmModelLoaded: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').ensureLmModelLoaded
   const fakeBrowser: typeof import('wxt/testing/fake-browser').fakeBrowser
-  const forgetEnsured: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').forgetEnsured
   const getAllContexts: typeof import('svelte').getAllContexts
   const getAppConfig: typeof import('wxt/utils/app-config').getAppConfig
   const getContext: typeof import('svelte').getContext
   const hasContext: typeof import('svelte').hasContext
   const injectScript: typeof import('wxt/utils/inject-script').injectScript
-  const isLoaded: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').isLoaded
   const isoFromCode: typeof import('C:/Users/William/Documents/Development/rosetta/utils/languages').isoFromCode
   const languageName: typeof import('C:/Users/William/Documents/Development/rosetta/utils/languages').languageName
-  const listLmModels: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').listLmModels
-  const loadLmModel: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').loadLmModel
   const loadSettings: typeof import('C:/Users/William/Documents/Development/rosetta/utils/settings').loadSettings
   const onDestroy: typeof import('svelte').onDestroy
   const onMount: typeof import('svelte').onMount
-  const parseTranslations: typeof import('C:/Users/William/Documents/Development/rosetta/utils/providers').parseTranslations
-  const profileFor: typeof import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio').profileFor
   const saveSettings: typeof import('C:/Users/William/Documents/Development/rosetta/utils/settings').saveSettings
   const setContext: typeof import('svelte').setContext
   const storage: typeof import('wxt/utils/storage').storage
@@ -79,9 +71,6 @@ declare global {
   export type { ScriptPublicPath, InjectScriptOptions } from 'wxt/utils/inject-script'
   import('wxt/utils/inject-script')
   // @ts-ignore
-  export type { LmModel, ModelProfile } from 'C:/Users/William/Documents/Development/rosetta/utils/lmstudio'
-  import('C:/Users/William/Documents/Development/rosetta/utils/lmstudio')
-  // @ts-ignore
-  export type { ProviderId, Settings } from 'C:/Users/William/Documents/Development/rosetta/utils/settings'
+  export type { Settings } from 'C:/Users/William/Documents/Development/rosetta/utils/settings'
   import('C:/Users/William/Documents/Development/rosetta/utils/settings')
 }

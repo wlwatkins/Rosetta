@@ -1,0 +1,81 @@
+#Requires -Version 7
+<#
+.SYNOPSIS
+    Sets the version, type-checks, builds and packages Rosetta.
+
+.EXAMPLE
+    .\build.ps1                 # prompts for the version
+    .\build.ps1 -Version 1.2.0  # non-interactive
+    .\build.ps1 -NoZip          # skip packaging
+#>
+[CmdletBinding()]
+param(
+    [string]$Version,
+    [switch]$NoZip
+)
+
+$ErrorActionPreference = 'Stop'
+Set-Location $PSScriptRoot
+
+$pkgPath = Join-Path $PSScriptRoot 'package.json'
+if (-not (Test-Path $pkgPath)) { throw "package.json not found next to this script." }
+
+$raw = Get-Content $pkgPath -Raw
+if ($raw -notmatch '"version"\s*:\s*"([^"]+)"') { throw 'No version field in package.json.' }
+$current = $Matches[1]
+
+function Get-NextPatch([string]$v) {
+    if ($v -match '^(\d+)\.(\d+)\.(\d+)$') {
+        return "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
+    }
+    return $v
+}
+
+if (-not $Version) {
+    $suggested = Get-NextPatch $current
+    Write-Host "Current version: $current" -ForegroundColor Cyan
+    $answer = Read-Host "New version [$suggested]"
+    $Version = if ([string]::IsNullOrWhiteSpace($answer)) { $suggested } else { $answer.Trim() }
+}
+
+# Chrome requires up to four dot-separated integers in the manifest version.
+if ($Version -notmatch '^\d+(\.\d+){1,3}$') {
+    throw "Version '$Version' must look like 1.2.3 (numbers and dots only)."
+}
+
+if ($Version -ne $current) {
+    # Patch only the first "version" field so the file's formatting survives.
+    $updated = [regex]::Replace($raw, '("version"\s*:\s*")[^"]+(")', "`${1}$Version`${2}", 1)
+    Set-Content -Path $pkgPath -Value $updated -NoNewline -Encoding utf8
+    Write-Host "package.json: $current -> $Version" -ForegroundColor Green
+}
+else {
+    Write-Host "Version unchanged ($current)" -ForegroundColor Yellow
+}
+
+Write-Host "`nType-checking..." -ForegroundColor Cyan
+npm run compile
+if ($LASTEXITCODE -ne 0) { throw 'svelte-check failed - build aborted.' }
+
+Write-Host "`nBuilding..." -ForegroundColor Cyan
+npm run build
+if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+
+if (-not $NoZip) {
+    Write-Host "`nPackaging..." -ForegroundColor Cyan
+    npm run zip
+    if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+}
+
+$out = Join-Path $PSScriptRoot '.output'
+Write-Host "`nRosetta $Version ready." -ForegroundColor Green
+Write-Host "  unpacked: $(Join-Path $out 'chrome-mv3')"
+if (-not $NoZip) {
+    Get-ChildItem $out -Filter '*.zip' |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 |
+        ForEach-Object {
+            Write-Host "  zip:      $($_.FullName) ($([math]::Round($_.Length / 1KB)) KB)"
+        }
+}
+Write-Host "`nLoad unpacked in brave://extensions to pick up the new build."

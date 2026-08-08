@@ -20,7 +20,6 @@ declare module '#imports' {
   export { fakeBrowser } from 'wxt/testing/fake-browser';
   export { clearCache, buildCachePrefix, countCached, withCache } from '../utils/cache';
   export { LANGUAGES, languageName, isoFromCode } from '../utils/languages';
-  export { profileFor, listLmModels, isLoaded, loadLmModel, cachedProfile, ensureLmModelLoaded, forgetEnsured, LmModel, ModelProfile } from '../utils/lmstudio';
-  export { cancelActive, translateBatch, parseTranslations } from '../utils/providers';
-  export { DEFAULT_SETTINGS, loadSettings, saveSettings, ProviderId, Settings } from '../utils/settings';
+  export { cancelActive, translateBatch } from '../utils/providers';
+  export { DEFAULT_SETTINGS, loadSettings, saveSettings, Settings } from '../utils/settings';
 }

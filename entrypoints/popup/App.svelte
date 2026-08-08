@@ -124,6 +124,8 @@
   async function saveAutoTab() {
     if (tabId == null) return;
     await browser.runtime.sendMessage({ type: 'set-auto-tab', tabId, enabled: autoTab });
+    // Turning it on acts on the page you're looking at, not just future loads.
+    if (autoTab && pageStatus === 'idle') void translate();
   }
 
   async function translate() {
