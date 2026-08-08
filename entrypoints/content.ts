@@ -3,10 +3,16 @@ import { browser } from 'wxt/browser';
 import { isoFromCode, sameLanguage } from '@/utils/languages';
 
 interface Entry {
-  node: Text;
+  /** Element used for visibility decisions and the shimmer highlight. */
+  el: Element;
+  /** Source text, trimmed — exactly what gets sent for translation. */
   original: string;
   queued: boolean;
   translated: boolean;
+  /** Text nodes shimmer; attribute values have nothing to paint. */
+  markable: boolean;
+  apply: (translated: string) => void;
+  reset: () => void;
 }
 
 type Status = 'idle' | 'working' | 'translated';
@@ -14,6 +20,11 @@ type Status = 'idle' | 'working' | 'translated';
 // Elements whose text must never be translated.
 const SKIP_SELECTOR =
   'script,style,noscript,code,pre,textarea,input,select,svg,iframe,canvas,[contenteditable]';
+
+// User-visible text that lives in attributes rather than text nodes:
+// search placeholders, tooltips, image alts, screen-reader labels.
+const TEXT_ATTRS = ['placeholder', 'title', 'aria-label', 'alt'] as const;
+const ATTR_SELECTOR = TEXT_ATTRS.map((a) => `[${a}]`).join(',');
 
 // Network round-trip dominates; send plenty per request but keep the query
 // string well under server limits.
@@ -25,6 +36,7 @@ export default defineContentScript({
   main() {
     let entries: Entry[] = [];
     let tracked = new WeakSet<Text>();
+    let trackedAttrs = new WeakMap<Element, Set<string>>();
     let status: Status = 'idle';
     let cancelled = false;
     let sessionId = 0;
@@ -70,7 +82,7 @@ export default defineContentScript({
         case 'get-cache-stats': {
           statsTarget = message.targetLang ?? '';
           void (async () => {
-            const all = entries.length ? entries.map((e) => e.original.trim()) : scanTexts();
+            const all = entries.length ? entries.map((e) => e.original) : scanTexts();
             // Only count strings a model would actually be asked to translate.
             const texts = all.filter((t) => needsTranslation(t));
             let iso = srcIso;
@@ -154,7 +166,57 @@ export default defineContentScript({
 
     function makeEntry(node: Text): Entry {
       tracked.add(node);
-      return { node, original: node.nodeValue!, queued: false, translated: false };
+      const raw = node.nodeValue!;
+      const lead = raw.match(/^\s*/)![0];
+      const trail = raw.match(/\s*$/)![0];
+      return {
+        el: node.parentElement!,
+        original: raw.trim(),
+        queued: false,
+        translated: false,
+        markable: true,
+        apply: (v) => {
+          node.nodeValue = lead + v + trail;
+        },
+        reset: () => {
+          node.nodeValue = raw;
+        },
+      };
+    }
+
+    function makeAttrEntry(el: Element, attr: string): Entry {
+      let seen = trackedAttrs.get(el);
+      if (!seen) trackedAttrs.set(el, (seen = new Set()));
+      seen.add(attr);
+      const raw = el.getAttribute(attr)!;
+      return {
+        el,
+        original: raw.trim(),
+        queued: false,
+        translated: false,
+        markable: false,
+        apply: (v) => el.setAttribute(attr, v),
+        reset: () => el.setAttribute(attr, raw),
+      };
+    }
+
+    function collectAttrs(root: Node): Entry[] {
+      if (!(root instanceof Element) && root.nodeType !== Node.DOCUMENT_NODE) return [];
+      const scope = root as Element;
+      const els: Element[] = [];
+      if (scope.matches?.(ATTR_SELECTOR)) els.push(scope);
+      els.push(...Array.from(scope.querySelectorAll?.(ATTR_SELECTOR) ?? []));
+
+      const out: Entry[] = [];
+      for (const el of els) {
+        const seen = trackedAttrs.get(el);
+        for (const attr of TEXT_ATTRS) {
+          if (seen?.has(attr)) continue;
+          const value = el.getAttribute(attr);
+          if (value && value.trim()) out.push(makeAttrEntry(el, attr));
+        }
+      }
+      return out;
     }
 
     function collectFrom(root: Node): Entry[] {
@@ -166,12 +228,13 @@ export default defineContentScript({
       });
       const out: Entry[] = [];
       for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(makeEntry(n as Text));
+      out.push(...collectAttrs(root));
       return out;
     }
 
     function observeEntries(newEntries: Entry[]) {
       for (const e of newEntries) {
-        const el = e.node.parentElement;
+        const el = e.el;
         if (!el) continue;
         let list = parentMap.get(el);
         if (!list) {
@@ -224,7 +287,8 @@ export default defineContentScript({
     }
 
     function markEntry(e: Entry) {
-      const el = e.node.parentElement;
+      if (!e.markable) return;
+      const el = e.el;
       if (!el) return;
       const n = markCounts.get(el) ?? 0;
       markCounts.set(el, n + 1);
@@ -232,7 +296,8 @@ export default defineContentScript({
     }
 
     function unmarkEntry(e: Entry) {
-      const el = e.node.parentElement;
+      if (!e.markable) return;
+      const el = e.el;
       if (!el) return;
       const n = markCounts.get(el);
       if (!n) return;
@@ -275,7 +340,7 @@ export default defineContentScript({
       if (!list) return;
       for (const e of list) {
         if (e.queued || e.translated) continue;
-        if (!needsTranslation(e.original.trim())) {
+        if (!needsTranslation(e.original)) {
           e.translated = true; // nothing to do — never send it to a model
           continue;
         }
@@ -410,7 +475,7 @@ export default defineContentScript({
     const VIEW_MARGIN = 200;
 
     function isVisibleNow(e: Entry): boolean {
-      const el = e.node.parentElement;
+      const el = e.el;
       if (!el || !el.isConnected) return false;
       if (!isRendered(el)) return false;
       const r = el.getBoundingClientRect();
@@ -422,7 +487,7 @@ export default defineContentScript({
     function deferEntry(e: Entry) {
       e.queued = false;
       unmarkEntry(e);
-      const el = e.node.parentElement;
+      const el = e.el;
       if (!el) return;
       let list = parentMap.get(el);
       if (!list) {
@@ -447,7 +512,7 @@ export default defineContentScript({
           deferred++;
           continue;
         }
-        const len = next.original.trim().length;
+        const len = next.original.length;
         if (batch.length > 0 && chars + len > limits.maxChars) break;
         batch.push(queue.shift()!);
         chars += len;
@@ -468,7 +533,7 @@ export default defineContentScript({
 
       const runBatch = (batch: Entry[]): Promise<void> =>
         (async () => {
-          const texts = batch.map((e) => e.original.trim());
+          const texts = batch.map((e) => e.original);
           const res = await browser.runtime
             .sendMessage({
               type: 'translate-batch',
@@ -541,16 +606,15 @@ export default defineContentScript({
 
     function applyTranslation(entry: Entry, translated: string | undefined) {
       if (typeof translated !== 'string' || translated.length === 0) return;
-      const lead = entry.original.match(/^\s*/)![0];
-      const trail = entry.original.match(/\s*$/)![0];
-      entry.node.nodeValue = lead + translated + trail;
+      entry.apply(translated);
     }
 
     function restore() {
       clearMarks();
-      for (const e of entries) e.node.nodeValue = e.original;
+      for (const e of entries) e.reset();
       entries = [];
       tracked = new WeakSet<Text>();
+      trackedAttrs = new WeakMap<Element, Set<string>>();
       status = 'idle';
       done = 0;
       lastElapsedMs = null;
@@ -585,7 +649,7 @@ export default defineContentScript({
 
     // In-browser MT models (NLLB) need an explicit source language.
     async function detectSourceIso(texts?: string[], minPercent = 0): Promise<string> {
-      const sample = (texts ?? entries.map((e) => e.original.trim()))
+      const sample = (texts ?? entries.map((e) => e.original))
         .slice(0, 80)
         .join(' ')
         .slice(0, 2000);
