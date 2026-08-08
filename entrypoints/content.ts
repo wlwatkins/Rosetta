@@ -33,7 +33,11 @@ const LIMITS = { maxTexts: 40, maxChars: 2000 };
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_idle',
+  // Pages like madlan.co.il put content inside iframes; each frame gets its
+  // own instance with its own queue.
+  allFrames: true,
   main() {
+    const isTopFrame = window.top === window.self;
     let entries: Entry[] = [];
     let tracked = new WeakSet<Text>();
     let trackedAttrs = new WeakMap<Element, Set<string>>();
@@ -118,10 +122,20 @@ export default defineContentScript({
     // global rule says "translate every page written in <language>".
     void (async () => {
       try {
+        // Sub-frames often hold too little text to language-detect reliably;
+        // the top frame decides, and its 'translate' broadcast reaches them.
+        if (!isTopFrame) return;
         const res = await browser.runtime.sendMessage({ type: 'auto-translate-check' });
         if (!res) return;
-        // Small delay so late-rendering content is included in the sample.
-        const start = () => setTimeout(() => void startSession(res.targetLang), 800);
+        // Ask the background to broadcast to every frame (including this one)
+        // so iframes translate as well. Small delay so late-rendering content
+        // is included in the sample.
+        const start = () =>
+          setTimeout(() => {
+            browser.runtime
+              .sendMessage({ type: 'broadcast-translate', targetLang: res.targetLang })
+              .catch(() => void startSession(res.targetLang));
+          }, 800);
 
         if (res.auto) {
           start();
@@ -135,7 +149,9 @@ export default defineContentScript({
           // far more annoying than not translating it.
           const detected = await detectSourceIso(scanTexts(), 60);
           if (detected && sameLanguage(detected, isoFromCode(res.autoSourceLang))) {
-            void startSession(res.targetLang);
+            browser.runtime
+              .sendMessage({ type: 'broadcast-translate', targetLang: res.targetLang })
+              .catch(() => void startSession(res.targetLang));
           }
         }, 800);
       } catch {
@@ -204,6 +220,8 @@ export default defineContentScript({
     // Anchor it to <html> so it queues immediately rather than waiting for
     // an element to scroll into view.
     function makeTitleEntry(): Entry | null {
+      // Only the top frame's title is ever shown to the user.
+      if (!isTopFrame) return null;
       const raw = document.title;
       if (!raw?.trim()) return null;
       return {

@@ -15,6 +15,8 @@
   let autoTab = $state(false);
   let cacheStats = $state<{ cached: number; total: number } | null>(null);
   let tabId: number | undefined;
+  const version = browser.runtime.getManifest().version;
+  const REPO_URL = 'https://github.com/wlwatkins/Rosetta';
 
   onMount(() => {
     void init();
@@ -32,7 +34,8 @@
       return;
     }
     try {
-      const res = await browser.tabs.sendMessage(tabId, { type: 'get-status' });
+      // frameId 0 = main frame. Without it, any iframe could answer first.
+      const res = await browser.tabs.sendMessage(tabId, { type: 'get-status' }, { frameId: 0 });
       pageStatus = res?.status ?? 'unavailable';
       progress = { done: res?.done ?? 0, total: res?.total ?? 0 };
       elapsedMs = res?.elapsedMs ?? null;
@@ -97,10 +100,11 @@
   async function refreshCacheStats() {
     if (tabId == null) return;
     try {
-      const page = await browser.tabs.sendMessage(tabId, {
-        type: 'get-cache-stats',
-        targetLang: settings.targetLang,
-      });
+      const page = await browser.tabs.sendMessage(
+        tabId,
+        { type: 'get-cache-stats', targetLang: settings.targetLang },
+        { frameId: 0 },
+      );
       if (!page?.texts?.length) {
         cacheStats = null;
         return;
@@ -152,7 +156,10 @@
 </script>
 
 <main>
-  <h1>Rosetta</h1>
+  <header>
+    <h1>Rosetta</h1>
+    <span class="he" lang="he" dir="rtl">רוזטה</span>
+  </header>
 
   {#if pageStatus === 'unavailable'}
     <p class="error">
@@ -215,6 +222,10 @@
       </p>
     {/if}
   {/if}
+
+  <p class="version">
+    <a href={REPO_URL} target="_blank" rel="noreferrer">Rosetta v{version}</a>
+  </p>
 </main>
 
 <style>
@@ -230,9 +241,22 @@
     flex-direction: column;
     gap: 10px;
   }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
   h1 {
     font-size: 16px;
     margin: 0;
+  }
+  .he {
+    font-size: 16px;
+    font-weight: 700;
+    /* Match the h1 rather than hard-coding black, so it stays legible if the
+       browser renders the popup in a dark theme. */
+    color: inherit;
   }
   .row {
     display: flex;
@@ -271,5 +295,20 @@
     margin: 0;
     color: #c0392b;
     font-size: 12px;
+  }
+  .version {
+    margin: 2px 0 0;
+    padding-top: 8px;
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    font-size: 11px;
+    text-align: right;
+  }
+  .version a {
+    color: #888;
+    text-decoration: none;
+  }
+  .version a:hover {
+    color: #3b6ff5;
+    text-decoration: underline;
   }
 </style>

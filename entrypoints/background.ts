@@ -55,6 +55,17 @@ export default defineBackground(() => {
       }
     }
 
+    // A frame decided the page should be auto-translated; every frame in the
+    // tab needs to act, not just that one.
+    if (message?.type === 'broadcast-translate') {
+      if (senderTabId != null) {
+        void browser.tabs
+          .sendMessage(senderTabId, { type: 'translate', targetLang: message.targetLang })
+          .catch(() => {});
+      }
+      sendResponse({ ok: true });
+      return;
+    }
     if (message?.type === 'set-auto-tab') {
       setAutoTab(message.tabId, message.enabled).then(() => sendResponse({ ok: true }));
       return true;

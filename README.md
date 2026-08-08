@@ -22,6 +22,9 @@ $20/million) — a small change to `utils/providers.ts`.
   can move an element out of view between queueing and sending.
 - **Reveal-aware.** Opening a menu or accordion triggers a recheck, so its text translates on the spot.
 - **Dynamic content.** A `MutationObserver` feeds newly rendered DOM into the same queue.
+- **Iframes.** The content script runs in every frame (`all_frames`), so pages that host their real
+  content in an iframe are translated too. Each frame keeps its own queue; the popup talks to the
+  main frame (`frameId: 0`) for status, and Translate / Cancel / Restore broadcast to all frames.
 - **In-place swap.** Only text nodes are replaced, so markup, links and layout survive. Originals are
   kept in memory, so **Restore** works without a reload.
 - **Attributes and the tab title too.** Text in `placeholder`, `title`, `aria-label` and `alt` is
