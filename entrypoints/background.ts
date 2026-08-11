@@ -20,6 +20,48 @@ async function setAutoTab(tabId: number, enabled: boolean): Promise<void> {
   await browser.storage.session.set({ [AUTO_KEY]: tabs });
 }
 
+// Per-tab active translation session, keyed by tab id -> target language.
+// A frame that loads *after* the session began — the iframe behind a modal, a
+// lazily mounted widget — never sees the one-off 'translate' broadcast, so it
+// asks whether its tab is mid-session and joins.
+const SESSION_KEY = 'sessionTabs';
+
+// These are read-modify-write; serialise them so two frames reporting at the
+// same moment can't clobber each other.
+let writes: Promise<unknown> = Promise.resolve();
+function serialise<T>(fn: () => Promise<T>): Promise<T> {
+  const next = writes.then(fn, fn);
+  writes = next.catch(() => {});
+  return next;
+}
+
+// The page is recorded alongside the language: a frame may reach us after the
+// tab has moved on, and it must not join a session that died with the old page.
+interface SessionRecord {
+  lang: string;
+  page: string;
+}
+
+async function getSessionTabs(): Promise<Record<string, SessionRecord>> {
+  const res = await browser.storage.session.get(SESSION_KEY);
+  return (res[SESSION_KEY] as Record<string, SessionRecord>) ?? {};
+}
+
+function setSessionTab(tabId: number, record: SessionRecord | null): Promise<void> {
+  return serialise(async () => {
+    const tabs = await getSessionTabs();
+    if (record) tabs[tabId] = record;
+    else delete tabs[tabId];
+    await browser.storage.session.set({ [SESSION_KEY]: tabs });
+  });
+}
+
+// Identifies the tab's top-level document. The hash is dropped because SPA
+// routing changes it constantly without replacing the page.
+function pageKey(url: string | undefined): string {
+  return (url ?? '').split('#')[0]!;
+}
+
 // Toolbar badge per tab: … translating, ✓ done, ! error, empty when idle.
 const BADGE_BY_TYPE: Record<string, string> = {
   progress: '…',
@@ -33,6 +75,7 @@ export default defineBackground(() => {
 
   browser.tabs.onRemoved.addListener((tabId) => {
     void setAutoTab(tabId, false);
+    void setSessionTab(tabId, null);
   });
   // Navigation wipes the page — clear a stale badge.
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -53,6 +96,40 @@ export default defineBackground(() => {
       if (badge !== undefined) {
         void browser.action.setBadgeText({ tabId: senderTabId, text: badge }).catch(() => {});
       }
+    }
+
+    // A frame started or stopped translating. Recording it per tab is what
+    // lets frames created later in the same tab pick the session up.
+    if (message?.type === 'session-started') {
+      if (senderTabId != null) {
+        void setSessionTab(senderTabId, {
+          lang: message.targetLang,
+          page: pageKey(sender.tab?.url),
+        });
+      }
+      sendResponse({ ok: true });
+      return;
+    }
+    // 'page-loaded' is a fresh top-level document: whatever session the tab
+    // had belonged to the page that just went away.
+    if (message?.type === 'session-ended' || message?.type === 'page-loaded') {
+      if (senderTabId != null) void setSessionTab(senderTabId, null);
+      sendResponse({ ok: true });
+      return;
+    }
+    if (message?.type === 'frame-session-check') {
+      if (senderTabId == null) {
+        sendResponse({ targetLang: null });
+        return;
+      }
+      const here = pageKey(sender.tab?.url);
+      getSessionTabs().then((tabs) => {
+        const rec = tabs[senderTabId];
+        // Guards the gap between a new page's frames loading and its top frame
+        // getting far enough to report itself.
+        sendResponse({ targetLang: rec?.page === here ? rec.lang : null });
+      });
+      return true;
     }
 
     // A frame decided the page should be auto-translated; every frame in the

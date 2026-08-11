@@ -75,6 +75,7 @@ export default defineContentScript({
           stopObservers();
           queue = [];
           browser.runtime.sendMessage({ type: 'cancel-batches' }).catch(() => {});
+          safeSend({ type: 'session-ended' });
           restore();
           safeSend({ type: 'restored' });
           sendResponse({ ok: true });
@@ -101,6 +102,7 @@ export default defineContentScript({
           queue = [];
           clearMarks();
           browser.runtime.sendMessage({ type: 'cancel-batches' }).catch(() => {});
+          safeSend({ type: 'session-ended' });
           if (!pumping) {
             status = done > 0 ? 'translated' : 'idle';
             safeSend({ type: 'cancelled', done, total: totalEstimate() });
@@ -118,13 +120,28 @@ export default defineContentScript({
       }
     });
 
+    // A new top-level document retires the tab's previous session. Reported
+    // from here rather than from a navigation event because a sub-frame
+    // loading can also mark the tab as navigating.
+    if (isTopFrame) safeSend({ type: 'page-loaded' });
+
     // Auto-translate on load: either this tab was flagged in the popup, or a
     // global rule says "translate every page written in <language>".
     void (async () => {
       try {
         // Sub-frames often hold too little text to language-detect reliably;
         // the top frame decides, and its 'translate' broadcast reaches them.
-        if (!isTopFrame) return;
+        // That broadcast is one-off, though: a frame created afterwards — the
+        // iframe behind a modal, a lazily mounted widget — never sees it, so
+        // ask whether this tab is already mid-session and join it.
+        if (!isTopFrame) {
+          // Let the frame's own app render before sampling its text.
+          await new Promise((r) => setTimeout(r, 800));
+          const active = await browser.runtime.sendMessage({ type: 'frame-session-check' });
+          // sessionTarget is already set if the broadcast got here first.
+          if (active?.targetLang && !sessionTarget) void startSession(active.targetLang);
+          return;
+        }
         const res = await browser.runtime.sendMessage({ type: 'auto-translate-check' });
         if (!res) return;
         // Ask the background to broadcast to every frame (including this one)
@@ -496,6 +513,7 @@ export default defineContentScript({
       lastError = null;
       lastElapsedMs = null;
       sessionTarget = targetLang;
+      safeSend({ type: 'session-started', targetLang });
       startedAt = performance.now();
       status = 'working';
       ensureStyle();
