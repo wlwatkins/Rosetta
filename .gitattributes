@@ -1,0 +1,12 @@
+# Normalise line endings on commit. Without this, a CRLF working tree against
+# LF blobs makes whole files show as modified forever — entrypoints/content.ts
+# reported 781 changed lines while being byte-identical after stripping CR.
+# Checkout still uses native endings, so Windows keeps CRLF locally.
+* text=auto
+
+# Never touch these.
+*.png binary
+*.zip binary
+*.onnx binary
+*.spm binary
+*.safetensors binary
