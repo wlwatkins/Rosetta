@@ -1,8 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from 'wxt/browser';
-  import { LANGUAGES } from '@/utils/languages';
-  import { DEFAULT_SETTINGS, loadSettings, saveSettings, type Settings } from '@/utils/settings';
+  import { ENGINES, engineInfo, engineSources, engineTargets } from '@/utils/languages';
+  import type { OpusStatus } from '@/utils/opus-types';
+  import {
+    DEFAULT_SETTINGS,
+    loadSettings,
+    reconcile,
+    saveSettings,
+    type Settings,
+  } from '@/utils/settings';
 
   type PageStatus = 'idle' | 'working' | 'translated' | 'unavailable';
 
@@ -14,6 +21,10 @@
   let error = $state<string | null>(null);
   let autoTab = $state(false);
   let cacheStats = $state<{ cached: number; total: number } | null>(null);
+  let model = $state<OpusStatus | null>(null);
+  let modelError = $state<string | null>(null);
+  const targets = $derived(engineTargets(settings.engine));
+  const isOffline = $derived(engineInfo(settings.engine).offline);
   let tabId: number | undefined;
   const version = browser.runtime.getManifest().version;
   const REPO_URL = 'https://github.com/wlwatkins/Rosetta';
@@ -46,12 +57,30 @@
     const at = await browser.runtime.sendMessage({ type: 'get-auto-tab', tabId }).catch(() => null);
     autoTab = !!at?.enabled;
     void refreshCacheStats();
+    void refreshModel();
   }
 
-  // Persist settings on any change.
+  // Persist settings on any change. reconcile() keeps the target legal for the
+  // engine — picking the offline one while the target is French moves the
+  // target to English rather than saving a combination nothing can serve.
   $effect(() => {
-    const snapshot = $state.snapshot(settings);
+    const snapshot = reconcile($state.snapshot(settings));
+    if (snapshot.targetLang !== settings.targetLang) settings.targetLang = snapshot.targetLang;
     if (loaded) void saveSettings(snapshot);
+  });
+
+  // Switching engine invalidates the cache figure (separate namespaces), the
+  // model status, and any run in flight.
+  let prevEngine = '';
+  $effect(() => {
+    const engine = settings.engine;
+    if (loaded && prevEngine && engine !== prevEngine) {
+      if (pageStatus === 'working') void cancel();
+      modelError = null;
+      void refreshCacheStats();
+      void refreshModel();
+    }
+    prevEngine = engine;
   });
 
   // Changing the target language mid-run aborts it — the output would be for
@@ -84,6 +113,8 @@
       pageStatus = 'idle';
       elapsedMs = null;
       error = null;
+    } else if (message?.type === 'opus-progress') {
+      model = message.status;
     }
   }
 
@@ -97,12 +128,51 @@
     }, 1500);
   }
 
+  async function refreshModel() {
+    if (!isOffline) {
+      model = null;
+      return;
+    }
+    const res = await browser.runtime.sendMessage({ type: 'opus-status' }).catch(() => null);
+    if (res?.ok) {
+      model = res.value;
+      modelError = null;
+    } else {
+      model = null;
+      modelError = res?.error ?? 'Could not reach the offline engine.';
+    }
+  }
+
+  async function downloadModel() {
+    modelError = null;
+    // Optimistic placeholder so the bar appears immediately; the real status
+    // arrives on the first opus-progress message.
+    model = {
+      ...(model ?? { modelId: '', approxMb: 0 }),
+      state: 'loading',
+      progress: 0,
+      device: null,
+      error: null,
+    };
+    const res = await browser.runtime.sendMessage({ type: 'opus-load' }).catch(() => null);
+    if (res?.ok) model = res.value;
+    else {
+      model = null;
+      modelError = res?.error ?? 'The model failed to load.';
+    }
+  }
+
+  async function removeModel() {
+    await browser.runtime.sendMessage({ type: 'opus-remove' }).catch(() => {});
+    void refreshModel();
+  }
+
   async function refreshCacheStats() {
     if (tabId == null) return;
     try {
       const page = await browser.tabs.sendMessage(
         tabId,
-        { type: 'get-cache-stats', targetLang: settings.targetLang },
+        { type: 'get-cache-stats', targetLang: settings.targetLang, engine: settings.engine },
         { frameId: 0 },
       );
       if (!page?.texts?.length) {
@@ -113,6 +183,8 @@
         type: 'count-cache',
         texts: page.texts,
         srcIso: page.srcIso ?? '',
+        targetLang: settings.targetLang,
+        engine: settings.engine,
       });
       cacheStats = { cached: res?.cached ?? 0, total: page.texts.length };
     } catch {
@@ -138,7 +210,11 @@
     elapsedMs = null;
     progress = { done: 0, total: 0 };
     pageStatus = 'working';
-    await browser.tabs.sendMessage(tabId, { type: 'translate', targetLang: settings.targetLang });
+    await browser.tabs.sendMessage(tabId, {
+      type: 'translate',
+      targetLang: settings.targetLang,
+      engine: settings.engine,
+    });
   }
 
   async function cancel() {
@@ -168,16 +244,55 @@
     </p>
   {:else}
     <label class="field">
-      Translate to
-      <select bind:value={settings.targetLang}>
-        {#each LANGUAGES as lang}
-          <option value={lang.code}>{lang.name}</option>
+      Engine
+      <select bind:value={settings.engine}>
+        {#each ENGINES as e}
+          <option value={e.id}>{e.label}</option>
         {/each}
       </select>
     </label>
 
+    {#if isOffline}
+      {#if modelError}
+        <p class="error">{modelError}</p>
+      {:else if model?.state === 'ready'}
+        <p class="hint">
+          Model ready ({model?.device === 'webgpu' ? 'GPU' : 'CPU'})
+          <button class="link" onclick={removeModel}>remove</button>
+        </p>
+      {:else if model?.state === 'loading'}
+        <progress value={model?.progress ?? 0} max="100"></progress>
+        <p class="hint">Downloading model… {model?.progress ?? 0}%</p>
+      {:else if model?.state === 'error'}
+        <p class="error">{model?.error}</p>
+        <button onclick={downloadModel}>Retry</button>
+      {:else}
+        <p class="hint">
+          Runs on this machine once downloaded — page text is never sent anywhere.
+          {#if model?.approxMb}One-time download, ~{model.approxMb}&nbsp;MB.{/if}
+        </p>
+        <button onclick={downloadModel}>Download model</button>
+      {/if}
+    {/if}
+
+    <label class="field">
+      Translate to
+      <select bind:value={settings.targetLang} disabled={targets.length < 2}>
+        {#each targets as lang}
+          <option value={lang.code}>{lang.name}</option>
+        {/each}
+      </select>
+      {#if targets.length < 2}
+        <span class="hint">{engineInfo(settings.engine).label} only translates Hebrew to English.</span>
+      {/if}
+    </label>
+
     <div class="row">
-      <button class="primary" onclick={translate} disabled={pageStatus === 'working'}>
+      <button
+        class="primary"
+        onclick={translate}
+        disabled={pageStatus === 'working' || (isOffline && model?.state !== 'ready')}
+      >
         {pageStatus === 'working' ? 'Translating…' : 'Translate page'}
       </button>
       {#if pageStatus === 'working'}
@@ -196,7 +311,7 @@
       Always translate pages written in
       <select bind:value={settings.autoSourceLang}>
         <option value="">Never — ask me each time</option>
-        {#each LANGUAGES.filter((l) => l.code !== settings.targetLang) as lang}
+        {#each engineSources(settings.engine).filter((l) => l.code !== settings.targetLang) as lang}
           <option value={lang.code}>{lang.name}</option>
         {/each}
       </select>

@@ -1,5 +1,6 @@
 # Build output and packaged zips
 .output
+.rosetta-src.tar
 stats.html
 stats-*.json
 
@@ -14,6 +15,9 @@ node_modules
 npm-debug.log*
 about-gpu-*.txt
 
+# Serena's per-machine project config
+.serena
+
 # Editor / OS noise
 .vscode/*
 !.vscode/extensions.json
@@ -26,3 +30,15 @@ Thumbs.db
 .env.*
 !.env.example
 web-ext.config.ts
+
+# ORT wasm binaries, copied in by scripts/copy-ort-wasm.mjs
+public/wasm/
+.opus-export/
+
+
+# Converted model, hosted rather than committed (365 MB, and GitHub
+# rejects files over 100 MB). Rebuild with scripts/convert-opus-int8.py.
+model/
+
+# Upstream weights downloaded for the conversion
+opus/

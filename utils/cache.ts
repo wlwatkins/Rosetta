@@ -67,12 +67,18 @@ export async function clearCache(): Promise<void> {
 }
 
 /**
- * Cache namespace. Only the target language matters — the source language is
- * implied by the source text itself, and the backend is irrelevant to what a
- * string means.
+ * Cache namespace: target language, plus the engine for anything that isn't
+ * Google. The source language is implied by the source text itself.
+ *
+ * Engines get separate namespaces on purpose. They are not interchangeable:
+ * serving a Google-produced string while the user has picked the offline
+ * engine would quietly send nothing to the network but still show text that
+ * came from it, and the two models word things differently enough that a page
+ * mixing both reads oddly. Google keeps the bare target code as its prefix, so
+ * every entry written before engines existed stays valid.
  */
-export function buildCachePrefix(targetCode: string): string {
-  return targetCode;
+export function buildCachePrefix(targetCode: string, engine = 'google'): string {
+  return engine === 'google' ? targetCode : `${targetCode}~${engine}`;
 }
 
 /** How many of `texts` already have a cached translation under `prefix`. */
@@ -93,7 +99,7 @@ export async function countCached(prefix: string, texts: string[]): Promise<numb
 export async function withCache(
   prefix: string,
   texts: string[],
-  translate: (missing: string[]) => Promise<string[]>,
+  fetchMissing: (missing: string[]) => Promise<string[]>,
 ): Promise<string[]> {
   const keyOf = (t: string) => `${prefix} ${t}`;
 
@@ -133,7 +139,7 @@ export async function withCache(
   const hits = texts.length - missing.length;
 
   if (missing.length > 0) {
-    const translated = await translate(missing);
+    const translated = await fetchMissing(missing);
     const fresh = new Map<string, string>();
     translated.forEach((tr, j) => {
       const idx = missingIdx[j];

@@ -1,5 +1,6 @@
 import { buildCachePrefix, withCache } from './cache';
-import { isoFromCode } from './languages';
+import { isoFromCode, type Engine } from './languages';
+import { opusCancel, opusTranslate } from './opus';
 
 // In-flight requests, so a user cancel can abort them mid-request.
 const activeControllers = new Set<AbortController>();
@@ -7,6 +8,8 @@ const activeControllers = new Set<AbortController>();
 export function cancelActive(): void {
   for (const c of activeControllers) c.abort();
   activeControllers.clear();
+  // The offline engine has no request to abort — it stops between sequences.
+  opusCancel();
 }
 
 async function trackedFetch(url: string, timeoutMs: number): Promise<Response> {
@@ -70,8 +73,12 @@ export async function translateBatch(
   texts: string[],
   targetLang: string,
   srcIso = '',
+  engine: Engine = 'google',
 ): Promise<string[]> {
-  return withCache(buildCachePrefix(targetLang), texts, (missing) =>
-    translateGoogle(missing, targetLang, srcIso),
+  return withCache(buildCachePrefix(targetLang, engine), texts, (missing) =>
+    engine === 'opus'
+      ? // Runs in the offscreen document; nothing here touches the network.
+        opusTranslate(missing)
+      : translateGoogle(missing, targetLang, srcIso),
   );
 }

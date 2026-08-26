@@ -2,6 +2,7 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { browser } from 'wxt/browser';
 import { buildCachePrefix, clearCache, countCached } from '@/utils/cache';
 import { cancelActive, translateBatch } from '@/utils/providers';
+import { opusAvailable, opusLoad, opusRemove, opusStatus, OPUS_UNAVAILABLE } from '@/utils/opus';
 import { loadSettings } from '@/utils/settings';
 
 // Per-tab auto-translate flags. storage.session survives service-worker
@@ -39,6 +40,7 @@ function serialise<T>(fn: () => Promise<T>): Promise<T> {
 // tab has moved on, and it must not join a session that died with the old page.
 interface SessionRecord {
   lang: string;
+  engine: string;
   page: string;
 }
 
@@ -104,6 +106,7 @@ export default defineBackground(() => {
       if (senderTabId != null) {
         void setSessionTab(senderTabId, {
           lang: message.targetLang,
+          engine: message.engine ?? 'google',
           page: pageKey(sender.tab?.url),
         });
       }
@@ -127,7 +130,8 @@ export default defineBackground(() => {
         const rec = tabs[senderTabId];
         // Guards the gap between a new page's frames loading and its top frame
         // getting far enough to report itself.
-        sendResponse({ targetLang: rec?.page === here ? rec.lang : null });
+        const live = rec?.page === here ? rec : null;
+        sendResponse({ targetLang: live?.lang ?? null, engine: live?.engine ?? 'google' });
       });
       return true;
     }
@@ -137,7 +141,11 @@ export default defineBackground(() => {
     if (message?.type === 'broadcast-translate') {
       if (senderTabId != null) {
         void browser.tabs
-          .sendMessage(senderTabId, { type: 'translate', targetLang: message.targetLang })
+          .sendMessage(senderTabId, {
+            type: 'translate',
+            targetLang: message.targetLang,
+            engine: message.engine,
+          })
           .catch(() => {});
       }
       sendResponse({ ok: true });
@@ -162,6 +170,7 @@ export default defineBackground(() => {
           // Global rule: translate any page detected as this language.
           autoSourceLang: settings.autoSourceLang,
           targetLang: settings.targetLang,
+          engine: settings.engine,
         };
       })().then(sendResponse);
       return true;
@@ -169,13 +178,45 @@ export default defineBackground(() => {
     if (message?.type === 'count-cache') {
       (async () => {
         const settings = await loadSettings();
-        const prefix = buildCachePrefix(settings.targetLang);
+        // The popup passes what it is showing; settings are the fallback for
+        // the moment right after a change, before the save has landed.
+        const prefix = buildCachePrefix(
+          message.targetLang ?? settings.targetLang,
+          message.engine ?? settings.engine,
+        );
         const texts: string[] = message.texts ?? [];
         const cached = await countCached(prefix, texts);
         return { cached, total: texts.length };
       })().then(sendResponse);
       return true;
     }
+    // --- offline engine -----------------------------------------------
+    if (message?.type === 'opus-status') {
+      if (!opusAvailable()) {
+        sendResponse({ ok: false, error: OPUS_UNAVAILABLE });
+        return true;
+      }
+      opusStatus().then(
+        (value) => sendResponse({ ok: true, value }),
+        (err) => sendResponse({ ok: false, error: String(err?.message ?? err) }),
+      );
+      return true;
+    }
+    if (message?.type === 'opus-load') {
+      opusLoad().then(
+        (value) => sendResponse({ ok: true, value }),
+        (err) => sendResponse({ ok: false, error: String(err?.message ?? err) }),
+      );
+      return true;
+    }
+    if (message?.type === 'opus-remove') {
+      opusRemove().then(
+        () => sendResponse({ ok: true }),
+        (err) => sendResponse({ ok: false, error: String(err?.message ?? err) }),
+      );
+      return true;
+    }
+
     if (message?.type === 'clear-cache') {
       clearCache().then(() => sendResponse({ ok: true }));
       return true;
@@ -187,7 +228,12 @@ export default defineBackground(() => {
     }
     if (message?.type !== 'translate-batch') return;
 
-    translateBatch(message.texts, message.targetLang, message.srcIso ?? '').then(
+    translateBatch(
+      message.texts,
+      message.targetLang,
+      message.srcIso ?? '',
+      message.engine ?? 'google',
+    ).then(
       (translations) => sendResponse({ ok: true, translations }),
       (err) => sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) }),
     );

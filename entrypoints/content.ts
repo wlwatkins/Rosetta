@@ -1,6 +1,12 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import { browser } from 'wxt/browser';
-import { isoFromCode, sameLanguage } from '@/utils/languages';
+import {
+  engineAcceptsSource,
+  engineInfo,
+  isoFromCode,
+  sameLanguage,
+  type Engine,
+} from '@/utils/languages';
 
 interface Entry {
   /** Element used for visibility decisions and the shimmer highlight. */
@@ -26,9 +32,15 @@ const SKIP_SELECTOR =
 const TEXT_ATTRS = ['placeholder', 'title', 'aria-label', 'alt'] as const;
 const ATTR_SELECTOR = TEXT_ATTRS.map((a) => `[${a}]`).join(',');
 
-// Network round-trip dominates; send plenty per request but keep the query
-// string well under server limits.
-const LIMITS = { maxTexts: 40, maxChars: 2000 };
+// Google: the network round-trip dominates, so send plenty per request while
+// keeping the query string well under server limits, and keep several in
+// flight. OPUS-MT is the opposite — one CPU/GPU doing the work, so four
+// concurrent generations just thrash it, and smaller batches put text on the
+// screen steadily instead of in lumps.
+const ENGINE_LIMITS: Record<Engine, { maxTexts: number; maxChars: number; maxInflight: number }> = {
+  google: { maxTexts: 40, maxChars: 2000, maxInflight: 4 },
+  opus: { maxTexts: 8, maxChars: 800, maxInflight: 1 },
+};
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -45,6 +57,7 @@ export default defineContentScript({
     let cancelled = false;
     let sessionId = 0;
     let sessionTarget = '';
+    let sessionEngine: Engine = 'google';
     let srcIso = '';
     let startedAt = 0;
     let queue: Entry[] = [];
@@ -81,11 +94,12 @@ export default defineContentScript({
           sendResponse({ ok: true });
           return;
         case 'translate':
-          void startSession(message.targetLang);
+          void startSession(message.targetLang, message.engine ?? 'google');
           sendResponse({ ok: true });
           return;
         case 'get-cache-stats': {
           statsTarget = message.targetLang ?? '';
+          statsEngine = message.engine ?? 'google';
           void (async () => {
             const all = entries.length ? entries.map((e) => e.original) : scanTexts();
             // Only count strings a model would actually be asked to translate.
@@ -139,7 +153,9 @@ export default defineContentScript({
           await new Promise((r) => setTimeout(r, 800));
           const active = await browser.runtime.sendMessage({ type: 'frame-session-check' });
           // sessionTarget is already set if the broadcast got here first.
-          if (active?.targetLang && !sessionTarget) void startSession(active.targetLang);
+          if (active?.targetLang && !sessionTarget) {
+            void startSession(active.targetLang, active.engine ?? 'google');
+          }
           return;
         }
         const res = await browser.runtime.sendMessage({ type: 'auto-translate-check' });
@@ -150,8 +166,12 @@ export default defineContentScript({
         const start = () =>
           setTimeout(() => {
             browser.runtime
-              .sendMessage({ type: 'broadcast-translate', targetLang: res.targetLang })
-              .catch(() => void startSession(res.targetLang));
+              .sendMessage({
+                type: 'broadcast-translate',
+                targetLang: res.targetLang,
+                engine: res.engine,
+              })
+              .catch(() => void startSession(res.targetLang, res.engine));
           }, 800);
 
         if (res.auto) {
@@ -167,8 +187,12 @@ export default defineContentScript({
           const detected = await detectSourceIso(scanTexts(), 60);
           if (detected && sameLanguage(detected, isoFromCode(res.autoSourceLang))) {
             browser.runtime
-              .sendMessage({ type: 'broadcast-translate', targetLang: res.targetLang })
-              .catch(() => void startSession(res.targetLang));
+              .sendMessage({
+                type: 'broadcast-translate',
+                targetLang: res.targetLang,
+                engine: res.engine,
+              })
+              .catch(() => void startSession(res.targetLang, res.engine));
           }
         }, 800);
       } catch {
@@ -177,10 +201,14 @@ export default defineContentScript({
     })();
 
     const HAS_LETTER = /\p{L}/u;
+    // Which script an engine's source language is written in, for the
+    // per-string check above. Only languages some engine restricts to.
+    const SCRIPT_OF: Record<string, RegExp> = { he: /\p{Script=Hebrew}/u };
     const ASCII_ONLY = /^[\x00-\x7F]*$/;
     // sessionTarget is empty before a run; fall back to the popup's target so
     // cache stats are meaningful on a page that hasn't been translated yet.
     let statsTarget = '';
+    let statsEngine: Engine = 'google';
 
     // Strings the model can't improve: no letters at all (prices, counts,
     // "•", "©"), or — when translating to English — already plain ASCII.
@@ -188,6 +216,10 @@ export default defineContentScript({
     function needsTranslation(text: string): boolean {
       if (!HAS_LETTER.test(text)) return false;
       if ((sessionTarget || statsTarget) === 'EN' && ASCII_ONLY.test(text)) return false;
+      // A single-pair model has nothing useful to say about a string in some
+      // other language, and asking it invites invented output.
+      const sources = engineInfo(sessionTarget ? sessionEngine : statsEngine).sources;
+      if (sources && !sources.some((iso) => SCRIPT_OF[iso]?.test(text))) return false;
       return true;
     }
 
@@ -484,7 +516,7 @@ export default defineContentScript({
     }
 
     function totalEstimate(): number {
-      const per = LIMITS.maxTexts;
+      const per = ENGINE_LIMITS[sessionEngine].maxTexts;
       return done + Math.ceil(queue.length / per) + (pumping ? 1 : 0);
     }
 
@@ -502,7 +534,7 @@ export default defineContentScript({
       });
     }
 
-    async function startSession(targetLang: string) {
+    async function startSession(targetLang: string, engine: Engine = 'google') {
       sessionId++;
       const id = sessionId;
       stopObservers();
@@ -513,7 +545,8 @@ export default defineContentScript({
       lastError = null;
       lastElapsedMs = null;
       sessionTarget = targetLang;
-      safeSend({ type: 'session-started', targetLang });
+      sessionEngine = engine;
+      safeSend({ type: 'session-started', targetLang, engine });
       startedAt = performance.now();
       status = 'working';
       ensureStyle();
@@ -523,6 +556,20 @@ export default defineContentScript({
       if (title) entries.push(title);
       srcIso = await detectSourceIso();
       if (id !== sessionId) return;
+
+      // A single-pair engine on the wrong page produces confident nonsense, so
+      // stop before anything is sent rather than translating the page badly.
+      if (!engineAcceptsSource(engine, srcIso)) {
+        const only = engineInfo(engine).sources?.join(', ') ?? '';
+        lastError = `This page doesn't look like ${only.toUpperCase()} — ${
+          engineInfo(engine).label
+        } only translates ${only.toUpperCase()} to English. Switch engines for this page.`;
+        status = 'idle';
+        entries = [];
+        safeSend({ type: 'session-ended' });
+        safeSend({ type: 'translate-error', message: lastError, done: 0, total: 0 });
+        return;
+      }
 
       io = new IntersectionObserver(onIntersect, { rootMargin: '200px' });
       observeEntries(entries);
@@ -557,7 +604,7 @@ export default defineContentScript({
     }
 
     function takeBatch(): Entry[] {
-      const limits = LIMITS;
+      const limits = ENGINE_LIMITS[sessionEngine];
       const batch: Entry[] = [];
       let chars = 0;
       let deferred = 0;
@@ -586,8 +633,7 @@ export default defineContentScript({
       if (pumping || id !== sessionId) return;
       pumping = true;
       let failed = false;
-      // Requests are network-bound, so several can be in flight at once.
-      const maxInflight = 4;
+      const maxInflight = ENGINE_LIMITS[sessionEngine].maxInflight;
       const inflight = new Set<Promise<void>>();
 
       const runBatch = (batch: Entry[]): Promise<void> =>
@@ -599,6 +645,7 @@ export default defineContentScript({
               texts,
               targetLang: sessionTarget,
               srcIso,
+              engine: sessionEngine,
             })
             .catch((err) => ({ ok: false, error: String(err) }));
 

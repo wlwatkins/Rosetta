@@ -2,14 +2,20 @@
   "name": "rosetta",
   "description": "Translate any page in place — Google Translate, your browser, or a local LLM",
   "private": true,
-  "version": "0.2.6",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
-    "dev": "wxt",
-    "build": "wxt build",
-    "zip": "wxt zip",
+    "dev": "npm run copy:wasm && wxt",
+    "copy:wasm": "node scripts/copy-ort-wasm.mjs",
+    "build": "npm run copy:wasm && wxt build",
+    "zip": "npm run copy:wasm && wxt zip",
+    "build:firefox": "npm run copy:wasm && wxt build -b firefox --mv3",
+    "zip:firefox": "npm run copy:wasm && wxt zip -b firefox --mv3",
     "compile": "svelte-check --tsconfig ./tsconfig.json",
     "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
     "@wxt-dev/module-svelte": "^2.0.5",

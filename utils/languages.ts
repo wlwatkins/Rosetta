@@ -36,3 +36,73 @@ export function sameLanguage(a: string, b: string): boolean {
   };
   return !!a && !!b && norm(a) === norm(b);
 }
+
+// ---------------------------------------------------------------------------
+// Engines
+// ---------------------------------------------------------------------------
+
+export type Engine = 'google' | 'opus';
+
+/**
+ * What each engine can actually do. `null` means "no restriction" — Google
+ * translates any pair in LANGUAGES. OPUS-MT is a single-pair Marian model:
+ * Hebrew in, English out, and nothing else. Keeping that here means the popup
+ * and the content script agree without either hard-coding 'HE'.
+ */
+export const ENGINES: {
+  id: Engine;
+  label: string;
+  /** Offline engines say so in the UI; online ones warn about leaving the machine. */
+  offline: boolean;
+  sources: string[] | null;
+  targets: string[] | null;
+}[] = [
+  {
+    id: 'google',
+    label: 'Google Translate (online)',
+    offline: false,
+    sources: null,
+    targets: null,
+  },
+  {
+    id: 'opus',
+    label: 'OPUS-MT (offline)',
+    offline: true,
+    sources: ['he'],
+    targets: ['EN'],
+  },
+];
+
+export function engineInfo(engine: string) {
+  return ENGINES.find((e) => e.id === engine) ?? ENGINES[0]!;
+}
+
+/** Target languages this engine can produce, in LANGUAGES order. */
+export function engineTargets(engine: string) {
+  const allowed = engineInfo(engine).targets;
+  return allowed ? LANGUAGES.filter((l) => allowed.includes(l.code)) : [...LANGUAGES];
+}
+
+/** Source languages this engine accepts, in LANGUAGES order. */
+export function engineSources(engine: string) {
+  const allowed = engineInfo(engine).sources;
+  return allowed
+    ? LANGUAGES.filter((l) => allowed.some((iso) => sameLanguage(iso, l.iso)))
+    : [...LANGUAGES];
+}
+
+/**
+ * Can this engine translate this page? An empty `srcIso` means detection was
+ * inconclusive — treated as acceptable, because refusing to translate a page
+ * we merely failed to identify is worse than trying.
+ */
+export function engineAcceptsSource(engine: string, srcIso: string): boolean {
+  const allowed = engineInfo(engine).sources;
+  if (!allowed || !srcIso) return true;
+  return allowed.some((iso) => sameLanguage(iso, srcIso));
+}
+
+export function engineAcceptsTarget(engine: string, targetCode: string): boolean {
+  const allowed = engineInfo(engine).targets;
+  return !allowed || allowed.includes(targetCode);
+}

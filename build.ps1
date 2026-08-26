@@ -7,11 +7,13 @@
     .\build.ps1                 # prompts for the version
     .\build.ps1 -Version 1.2.0  # non-interactive
     .\build.ps1 -NoZip          # skip packaging
+    .\build.ps1 -ChromeOnly     # skip the Firefox target
 #>
 [CmdletBinding()]
 param(
     [string]$Version,
-    [switch]$NoZip
+    [switch]$NoZip,
+    [switch]$ChromeOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,15 +69,33 @@ if (-not $NoZip) {
     if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
 }
 
+if (-not $ChromeOnly) {
+    # A separate target, not a repackage of the Chrome build: AMO rejects
+    # `background.service_worker`, so WXT emits `background.scripts` here, the
+    # manifest picks up the gecko id and data-collection declaration, and the
+    # offline model is dropped (no chrome.offscreen in Firefox).
+    Write-Host "`nBuilding Firefox (MV3)..." -ForegroundColor Cyan
+    if ($NoZip) { npm run build:firefox } else { npm run zip:firefox }
+    if ($LASTEXITCODE -ne 0) { throw 'Firefox build failed.' }
+}
+
 $out = Join-Path $PSScriptRoot '.output'
 Write-Host "`nRosetta $Version ready." -ForegroundColor Green
 Write-Host "  unpacked: $(Join-Path $out 'chrome-mv3')"
+if (-not $ChromeOnly) { Write-Host "  unpacked: $(Join-Path $out 'firefox-mv3')" }
 if (-not $NoZip) {
+    $take = if ($ChromeOnly) { 1 } else { 3 }
     Get-ChildItem $out -Filter '*.zip' |
         Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1 |
+        Select-Object -First $take |
         ForEach-Object {
             Write-Host "  zip:      $($_.FullName) ($([math]::Round($_.Length / 1KB)) KB)"
         }
 }
 Write-Host "`nLoad unpacked in brave://extensions to pick up the new build."
+if (-not $ChromeOnly) {
+    # Temporary add-on: Firefox drops it when the browser closes, and any file
+    # inside the folder will do as the target.
+    Write-Host "Firefox: about:debugging#/runtime/this-firefox -> Load Temporary Add-on ->"
+    Write-Host "  $(Join-Path $out 'firefox-mv3\manifest.json')"
+}
